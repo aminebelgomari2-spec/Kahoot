@@ -1,0 +1,436 @@
+```html
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kahoot! - Connexion & Salon P2P</title>
+    
+    <!-- Tailwind CSS pour la mise en page responsive -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PeerJS pour les connexions WebRTC Peer-to-Peer -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+    <!-- Polices Montserrat et Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Montserrat', 'Inter', sans-serif;
+            background-color: #46178f;
+            overflow-x: hidden;
+            user-select: none;
+        }
+
+        /* Arrière-plan animé avec formes géométriques Kahoot! */
+        .bg-shapes {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            overflow: hidden;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .shape {
+            position: absolute;
+            display: block;
+            opacity: 0.2;
+            animation: floatShape 16s infinite linear;
+            bottom: -150px;
+        }
+
+        .shape.square { border-radius: 8px; }
+        .shape.circle { border-radius: 50%; }
+        .shape.triangle {
+            width: 0 !important;
+            height: 0 !important;
+            background-color: transparent !important;
+            border-left: 25px solid transparent;
+            border-right: 25px solid transparent;
+            border-bottom: 50px solid rgba(255, 255, 255, 0.4);
+        }
+
+        @keyframes floatShape {
+            0% { transform: translateY(0) rotate(0deg); opacity: 0.2; }
+            50% { opacity: 0.35; }
+            100% { transform: translateY(-120vh) rotate(360deg); opacity: 0; }
+        }
+
+        /* Styles Boutons & Cartes 3D style Kahoot! */
+        .kahoot-card {
+            box-shadow: 0 8px 0 rgba(0, 0, 0, 0.3);
+        }
+
+        .kahoot-input {
+            border: 3px solid #e0e0e0;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+            transition: all 0.2s ease;
+        }
+
+        .kahoot-input:focus {
+            border-color: #333;
+            outline: none;
+        }
+
+        .kahoot-btn-black {
+            background-color: #333333; color: #ffffff;
+            box-shadow: 0 5px 0 #000000;
+            transition: all 0.1s ease;
+        }
+        .kahoot-btn-black:hover { background-color: #222222; }
+        .kahoot-btn-black:active { transform: translateY(4px); box-shadow: 0 1px 0 #000000; }
+
+        .kahoot-btn-green {
+            background-color: #26890c; color: #ffffff;
+            box-shadow: 0 5px 0 #185a06;
+            transition: all 0.1s ease;
+        }
+        .kahoot-btn-green:hover { background-color: #21780a; }
+        .kahoot-btn-green:active { transform: translateY(4px); box-shadow: 0 1px 0 #185a06; }
+
+        .kahoot-btn-blue {
+            background-color: #1368ce; color: #ffffff;
+            box-shadow: 0 5px 0 #0a4387;
+            transition: all 0.1s ease;
+        }
+        .kahoot-btn-blue:hover { background-color: #0f5bb8; }
+        .kahoot-btn-blue:active { transform: translateY(4px); box-shadow: 0 1px 0 #0a4387; }
+
+        /* Notification Toast */
+        #toast {
+            transition: all 0.3s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+        }
+
+        /* Scrollbar personnalisée */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.05); }
+        ::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.2); border-radius: 4px; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between items-center p-3 sm:p-6 relative text-gray-900">
+
+    <div class="bg-shapes" id="shapesContainer"></div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed top-5 left-1/2 -translate-x-1/2 bg-gray-900 text-white font-bold px-6 py-3 rounded-full shadow-2xl z-50 opacity-0 pointer-events-none transform -translate-y-4">
+        <span id="toastMsg">Notification</span>
+    </div>
+
+    <!-- Main Container -->
+    <main class="w-full max-w-2xl flex flex-col items-center justify-center my-auto z-10 relative py-4">
+
+        <div id="headerLogo" class="mb-6 select-none transform hover:scale-105 transition-transform duration-200 cursor-pointer">
+            <svg class="w-52 sm:w-64 h-auto drop-shadow-xl" viewBox="0 0 300 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-family="'Montserrat', sans-serif" font-weight="900" font-size="52" fill="#FFFFFF" letter-spacing="-2">Kahoot!</text>
+            </svg>
+        </div>
+
+        <!-- 1. FORMULAIRE CODE PIN -->
+        <div id="viewPin" class="kahoot-card bg-white rounded-lg p-6 w-full max-w-md text-center">
+            <form id="pinForm">
+                <div class="mb-4">
+                    <input 
+                        type="text" 
+                        id="gamePinInput"
+                        placeholder="PIN du jeu" 
+                        maxlength="6"
+                        autocomplete="off"
+                        class="kahoot-input w-full p-4 text-center font-black text-2xl sm:text-3xl rounded-md text-gray-800 placeholder-gray-400 uppercase tracking-widest"
+                        required
+                    />
+                </div>
+                <button 
+                    type="submit" 
+                    class="kahoot-btn-black w-full py-4 font-extrabold text-xl rounded-md tracking-wide uppercase">
+                    Valider
+                </button>
+            </form>
+        </div>
+
+        <!-- 2. FORMULAIRE PSEUDO (POUR LES JOUEURS) -->
+        <div id="viewNickname" class="kahoot-card bg-white rounded-lg p-6 w-full max-w-md text-center hidden">
+            <div class="mb-3 text-sm font-extrabold text-purple-700 uppercase tracking-wider">
+                Rejoindre le salon <span id="targetPinDisplay" class="font-mono underline"></span>
+            </div>
+            <form id="nicknameForm">
+                <div class="mb-4">
+                    <input 
+                        type="text" 
+                        id="nicknameInput"
+                        placeholder="Votre Pseudo" 
+                        maxlength="15"
+                        autocomplete="off"
+                        class="kahoot-input w-full p-4 text-center font-black text-2xl sm:text-3xl rounded-md text-gray-800 placeholder-gray-400"
+                        required
+                    />
+                </div>
+                <button 
+                    type="submit" 
+                    id="joinBtn"
+                    class="kahoot-btn-green w-full py-4 font-extrabold text-xl rounded-md tracking-wide uppercase flex items-center justify-center gap-2">
+                    <span>OK, c'est parti !</span>
+                </button>
+            </form>
+            <button id="btnBackToPin" onclick="window.showView('viewPin')" class="mt-4 text-xs font-bold text-gray-400 hover:text-gray-600 underline">
+                ← Modifier le PIN
+            </button>
+        </div>
+
+        <!-- 3. INTERFACE HÔTE (CRÉATION DU SALON) -->
+        <div id="viewHostDashboard" class="hidden w-full flex flex-col items-center">
+            
+            <!-- Carte de création initiale -->
+            <div id="hostCreateCard" class="kahoot-card bg-white rounded-xl p-6 w-full max-w-md text-center">
+                <div class="w-16 h-16 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center mx-auto mb-3 text-2xl font-black">
+                    👑
+                </div>
+                <h2 class="text-2xl font-black text-gray-800 mb-2">Espace Créateur</h2>
+                <p class="text-sm text-gray-500 font-semibold mb-6">Créez un salon P2P en un clic et permettez aux joueurs de discuter avec vous !</p>
+                
+                <button 
+                    onclick="window.createHostRoom()" 
+                    id="createRoomBtn"
+                    class="kahoot-btn-green w-full py-4 font-extrabold text-xl rounded-lg uppercase tracking-wider flex items-center justify-center gap-2">
+                    🚀 Créer le salon
+                </button>
+                <button onclick="window.showView('viewPin')" class="mt-4 text-xs font-bold text-gray-400 hover:text-gray-600 underline">
+                    Retour à l'accueil
+                </button>
+            </div>
+
+            <!-- Dashboard du salon créé -->
+            <div id="hostActiveRoom" class="hidden w-full max-w-2xl flex flex-col items-center">
+                
+                <!-- Bannière du PIN du Jeu -->
+                <div class="bg-white rounded-xl p-4 w-full shadow-2xl mb-4 text-center border-4 border-yellow-400 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div class="text-left">
+                        <span class="text-xs uppercase font-extrabold text-purple-700 tracking-wider">PIN du salon P2P :</span>
+                        <div class="text-4xl sm:text-5xl font-black font-mono text-gray-900 tracking-widest" id="generatedPinDisplay">------</div>
+                    </div>
+                    <div class="flex gap-2 w-full sm:w-auto">
+                        <button onclick="window.copyRoomPin()" class="kahoot-btn-blue px-4 py-2 text-xs font-extrabold rounded-md uppercase flex-1 sm:flex-initial">
+                            📋 Copier le PIN
+                        </button>
+                        <button onclick="window.usePinInClient()" class="kahoot-btn-green px-4 py-2 text-xs font-extrabold rounded-md uppercase flex-1 sm:flex-initial">
+                            🔗 Tester comme joueur
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Interface Chat / Hôte -->
+                <div class="bg-white rounded-xl shadow-2xl w-full overflow-hidden flex flex-col h-[450px]">
+                    <div class="bg-purple-900 text-white p-3.5 font-extrabold flex justify-between items-center px-5">
+                        <span class="flex items-center gap-2">👑 Salon Hôte (Chat P2P)</span>
+                        <span id="hostMemberCount" class="text-xs bg-purple-700 px-3 py-1 rounded-full border border-purple-500">1 participant (Vous)</span>
+                    </div>
+
+                    <div class="flex-1 flex overflow-hidden">
+                        <!-- Zone de messages -->
+                        <div class="flex-1 p-4 overflow-y-auto space-y-3 bg-gray-50 flex flex-col" id="hostChatMessages">
+                            <div class="text-center my-auto text-gray-400 text-xs font-bold">
+                                Le salon est prêt ! Partagez le PIN pour voir les participants arriver.
+                            </div>
+                        </div>
+
+                        <!-- Barre latérale Joueurs -->
+                        <div class="w-44 border-l border-gray-200 bg-white p-3 hidden sm:block overflow-y-auto">
+                            <p class="text-[10px] font-black uppercase text-gray-400 mb-2">Connectés :</p>
+                            <ul id="hostMemberList" class="space-y-1.5 text-xs font-bold text-gray-700">
+                                <li class="text-purple-700 flex items-center gap-1">👑 Hôte (Vous)</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Envoi Message Hôte -->
+                    <form id="hostChatForm" class="p-3 bg-white border-t border-gray-200 flex gap-2">
+                        <input 
+                            type="text" 
+                            id="hostChatInput"
+                            placeholder="Message en tant qu'Hôte..." 
+                            maxlength="150"
+                            class="flex-1 px-4 py-2.5 border-2 border-gray-200 rounded-lg font-semibold text-sm focus:outline-none focus:border-purple-600"
+                        />
+                        <button type="submit" class="kahoot-btn-blue px-6 py-2.5 text-sm font-extrabold rounded-lg uppercase">
+                            Envoyer
+                        </button>
+                    </form>
+                </div>
+
+                <button onclick="window.closeHostRoom()" class="mt-4 text-white/70 hover:text-white underline text-xs font-semibold">
+                    Fermer le salon
+                </button>
+            </div>
+
+        </div>
+
+        <!-- 4. INTERFACE SALON DU JOUEUR -->
+        <div id="viewPlayerLobby" class="hidden w-full max-w-xl flex flex-col items-center">
+            
+            <div class="bg-black/30 backdrop-blur-md border border-white/20 rounded-xl p-4 w-full text-white shadow-2xl mb-4 text-center">
+                <span class="text-xs uppercase tracking-widest font-extrabold text-purple-200">Connecté au salon</span>
+                <div class="text-3xl font-black font-mono tracking-wider text-yellow-300" id="playerRoomPinDisplay">PIN: -----</div>
+                <div class="mt-2 text-sm font-extrabold">
+                    Pseudo : <span class="text-green-400" id="playerNicknameDisplay">Joueur</span>
+                </div>
+            </div>
+
+            <!-- Boîte de Chat Joueur -->
+            <div class="bg-white rounded-xl shadow-2xl w-full overflow-hidden flex flex-col h-[420px]">
+                <div class="bg-purple-900 text-white p-3.5 font-extrabold flex justify-between items-center px-5">
+                    <span class="flex items-center gap-2 text-sm sm:text-base">💬 Chat du Salon</span>
+                    <span id="playerOnlineCount" class="text-xs bg-purple-700 px-3 py-1 rounded-full">1 connecté</span>
+                </div>
+                
+                <!-- Messages -->
+                <div id="playerChatMessages" class="flex-1 p-4 overflow-y-auto space-y-3 bg-gray-50 flex flex-col">
+                    <div class="text-center my-auto text-gray-400 text-xs font-bold">
+                        Bienvenue dans le salon ! Dites bonjour 👋
+                    </div>
+                </div>
+
+                <!-- Input Chat -->
+                <form id="playerChatForm" class="p-3 bg-white border-t border-gray-200 flex gap-2">
+                    <input 
+                        type="text" 
+                        id="playerChatInput"
+                        placeholder="Écrivez un message..." 
+                        maxlength="150"
+                        class="flex-1 px-4 py-2.5 border-2 border-gray-200 rounded-lg font-semibold text-sm focus:outline-none focus:border-purple-600"
+                    />
+                    <button type="submit" class="kahoot-btn-blue px-6 py-2.5 text-sm font-extrabold rounded-lg uppercase">
+                        Envoyer
+                    </button>
+                </form>
+            </div>
+
+            <button onclick="window.leavePlayerRoom()" class="mt-4 text-white/70 hover:text-white underline text-xs font-semibold">
+                Quitter le salon
+            </button>
+        </div>
+
+    </main>
+
+    <script>
+        // Prefix unique pour éviter tout conflit global sur les serveurs publics PeerJS
+        const PEER_PREFIX = "kahoot_p2p_room_pin_";
+
+        // Variables d'état globales
+        let currentView = 'viewPin';
+        let targetPin = '';
+        let myNickname = '';
+        
+        // Variables PeerJS
+        let peer = null;
+        let hostConnections = []; 
+        let playerConn = null;     
+        let isHost = false;
+        let connectedPlayersList = [];
+
+        function showView(viewId) {
+            const views = ['viewPin', 'viewNickname', 'viewHostDashboard', 'viewPlayerLobby'];
+            views.forEach(function(id) {
+                const el = document.getElementById(id);
+                if (el) el.classList.add('hidden');
+            });
+            const target = document.getElementById(viewId);
+            if (target) target.classList.remove('hidden');
+            currentView = viewId;
+        }
+        window.showView = showView;
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toastMsg');
+            if (!toast || !toastMsg) return;
+            toastMsg.innerText = msg;
+            toast.classList.remove('opacity-0', '-translate-y-4', 'pointer-events-none');
+            setTimeout(function() {
+                toast.classList.add('opacity-0', '-translate-y-4', 'pointer-events-none');
+            }, 3000);
+        }
+        window.showToast = showToast;
+
+        function cleanupConnections() {
+            if (playerConn) {
+                try { playerConn.close(); } catch(e){}
+                playerConn = null;
+            }
+            if (hostConnections.length > 0) {
+                hostConnections.forEach(function(c) { try { c.close(); } catch(e){} });
+                hostConnections = [];
+            }
+            if (peer) {
+                try { peer.destroy(); } catch(e){}
+                peer = null;
+            }
+            isHost = false;
+            connectedPlayersList = [];
+        }
+        window.cleanupConnections = cleanupConnections;
+
+        function resetApp() {
+            if (confirm("Voulez-vous retourner à l'écran de connexion ?")) {
+                cleanupConnections();
+                showView('viewPin');
+            }
+        }
+        window.resetApp = resetApp;
+
+        function handlePinSubmit(e) {
+            if (e && e.preventDefault) e.preventDefault();
+            const pinInput = document.getElementById('gamePinInput').value.trim();
+            
+            if (!pinInput) return false;
+
+            // CODE SECRET "9999" (Ouvre le dashboard d'hôte)
+            if (pinInput === "9999") {
+                showView('viewHostDashboard');
+                document.getElementById('hostCreateCard').classList.remove('hidden');
+                document.getElementById('hostActiveRoom').classList.add('hidden');
+                return false;
+            }
+
+            // PIN DE SALON NORMAL
+            targetPin = pinInput;
+            document.getElementById('targetPinDisplay').innerText = targetPin;
+            showView('viewNickname');
+            return false;
+        }
+        window.handlePinSubmit = handlePinSubmit;
+
+        function handleNicknameSubmit(e) {
+            if (e && e.preventDefault) e.preventDefault();
+            const nick = document.getElementById('nicknameInput').value.trim();
+            if (!nick) return false;
+
+            myNickname = nick;
+            connectToHost(targetPin, myNickname);
+            return false;
+        }
+        window.handleNicknameSubmit = handleNicknameSubmit;
+
+        function createHostRoom() {
+            if (typeof Peer === 'undefined') {
+                showToast("Erreur: PeerJS n'est pas encore chargé.");
+                return;
+            }
+            cleanupConnections();
+            isHost = true;
+
+            // Générer un PIN à 6 chiffres
+            const randomPin = Math.floor(100000 + Math.random() * 900000).toString();
+            const peerId = PEER_PREFIX + randomPin;
+
+            const btn = document.getElementById('createRoomBtn');
+            btn.innerHTML = '<span>Initialisation P2P...</span>';
+            btn.disabled = true;
+
+            peer = new Peer(peerId);
+
+            peer.on('open', function(id) {
+                document.getElementById('generatedPinDisplay').innerText = randomPin;
+                document.getElementById('hostCreateCard').classList.add('hidden');
+                document.getElementById('hostActiveRoom').classList.remove('hidden');
+                
+                const hostMsgBox = document.getElementById('hostChatMessages');
+                hostMsgBox.innerHTML = '<div class="text-center my-aut
