@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -433,4 +432,351 @@
                 document.getElementById('hostActiveRoom').classList.remove('hidden');
                 
                 const hostMsgBox = document.getElementById('hostChatMessages');
-                hostMsgBox.innerHTML = '<div class="text-center my-aut
+                hostMsgBox.innerHTML = '<div class="text-center my-auto text-gray-400 text-xs font-bold">Salon P2P créé ! Partagez le PIN <span class="text-purple-700 font-mono">' + randomPin + '</span> avec vos amis.</div>';
+
+                connectedPlayersList = [{ id: 'host', nick: '👑 Hôte (Vous)' }];
+                updateHostMemberList();
+            });
+
+            peer.on('connection', function(conn) {
+                hostConnections.push(conn);
+
+                conn.on('data', function(data) {
+                    handleHostReceivedData(conn, data);
+                });
+
+                conn.on('close', function() {
+                    hostConnections = hostConnections.filter(function(c) { return c !== conn; });
+                    if (conn.playerNick) {
+                        broadcastSystemMessage(conn.playerNick + ' a quitté le salon.');
+                        connectedPlayersList = connectedPlayersList.filter(function(p) { return p.nick !== conn.playerNick; });
+                        updateHostMemberList();
+                    }
+                });
+            });
+
+            peer.on('error', function(err) {
+                console.error("PeerJS Host Error:", err);
+                showToast("Erreur lors de la création du salon P2P.");
+                btn.innerHTML = '🚀 Créer le salon';
+                btn.disabled = false;
+            });
+        }
+        window.createHostRoom = createHostRoom;
+
+        function copyRoomPin() {
+            const pin = document.getElementById('generatedPinDisplay').innerText;
+            if (!pin || pin === '------') return;
+            
+            const textarea = document.createElement('textarea');
+            textarea.value = pin;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+
+            showToast('PIN ' + pin + ' copié dans le presse-papier !');
+        }
+        window.copyRoomPin = copyRoomPin;
+
+        function usePinInClient() {
+            const pin = document.getElementById('generatedPinDisplay').innerText;
+            if (!pin || pin === '------') return;
+            
+            document.getElementById('gamePinInput').value = pin;
+            showToast('PIN ' + pin + ' appliqué dans l\'écran de connexion.');
+        }
+        window.usePinInClient = usePinInClient;
+
+        function closeHostRoom() {
+            if (confirm("Voulez-vous fermer ce salon P2P ? Tous les joueurs seront déconnectés.")) {
+                broadcastMessage({ type: 'ROOM_CLOSED' });
+                cleanupConnections();
+                showView('viewHostDashboard');
+                document.getElementById('hostCreateCard').classList.remove('hidden');
+                document.getElementById('hostActiveRoom').classList.add('hidden');
+                const btn = document.getElementById('createRoomBtn');
+                btn.innerHTML = '🚀 Créer le salon';
+                btn.disabled = false;
+                showToast("Salon fermé.");
+            }
+        }
+        window.closeHostRoom = closeHostRoom;
+
+        function connectToHost(pin, nick) {
+            if (typeof Peer === 'undefined') {
+                showToast("Erreur: PeerJS n'est pas encore chargé.");
+                return;
+            }
+            cleanupConnections();
+
+            showToast("Connexion au salon en cours...");
+            peer = new Peer();
+
+            peer.on('open', function() {
+                const targetPeerId = PEER_PREFIX + pin;
+                playerConn = peer.connect(targetPeerId);
+
+                playerConn.on('open', function() {
+                    playerConn.send({
+                        type: 'JOIN',
+                        nickname: nick
+                    });
+
+                    document.getElementById('playerRoomPinDisplay').innerText = 'PIN: ' + pin;
+                    document.getElementById('playerNicknameDisplay').innerText = nick;
+                    
+                    const playerMsgBox = document.getElementById('playerChatMessages');
+                    playerMsgBox.innerHTML = '<div class="text-center my-auto text-gray-400 text-xs font-bold">Connecté au salon P2P ! Dites bonjour 👋</div>';
+
+                    showView('viewPlayerLobby');
+                    showToast("Connecté avec succès !");
+                });
+
+                playerConn.on('data', function(data) {
+                    handlePlayerReceivedData(data);
+                });
+
+                playerConn.on('close', function() {
+                    showToast("Déconnecté du salon.");
+                    showView('viewPin');
+                });
+            });
+
+            peer.on('error', function(err) {
+                console.error("PeerJS Player Error:", err);
+                showToast("Impossible de rejoindre. Vérifiez le PIN.");
+            });
+        }
+        window.connectToHost = connectToHost;
+
+        function leavePlayerRoom() {
+            cleanupConnections();
+            showView('viewPin');
+            showToast("Vous avez quitté le salon.");
+        }
+        window.leavePlayerRoom = leavePlayerRoom;
+
+        function handleHostReceivedData(conn, data) {
+            if (!data) return;
+
+            if (data.type === 'JOIN') {
+                conn.playerNick = data.nickname || 'Joueur Anonyme';
+                connectedPlayersList.push({ id: conn.peer, nick: conn.playerNick });
+                updateHostMemberList();
+
+                conn.send({
+                    type: 'JOIN_ACK',
+                    memberCount: connectedPlayersList.length
+                });
+
+                broadcastSystemMessage(conn.playerNick + ' a rejoint le salon !');
+            } else if (data.type === 'CHAT') {
+                renderChatMessage('hostChatMessages', data.sender, data.message, false);
+                broadcastMessage({
+                    type: 'CHAT',
+                    sender: data.sender,
+                    message: data.message
+                }, conn);
+            }
+        }
+
+        function handlePlayerReceivedData(data) {
+            if (!data) return;
+
+            if (data.type === 'CHAT') {
+                renderChatMessage('playerChatMessages', data.sender, data.message, data.isHost);
+            } else if (data.type === 'SYSTEM') {
+                renderSystemMessage('playerChatMessages', data.message);
+            } else if (data.type === 'JOIN_ACK') {
+                document.getElementById('playerOnlineCount').innerText = data.memberCount + ' connecté(s)';
+            } else if (data.type === 'ROOM_CLOSED') {
+                showToast("L'hôte a fermé le salon.");
+                cleanupConnections();
+                showView('viewPin');
+            }
+        }
+
+        function broadcastMessage(data, excludeConn) {
+            if (!excludeConn) excludeConn = null;
+            hostConnections.forEach(function(conn) {
+                if (conn !== excludeConn && conn.open) {
+                    conn.send(data);
+                }
+            });
+        }
+
+        function broadcastSystemMessage(msg) {
+            renderSystemMessage('hostChatMessages', msg);
+            broadcastMessage({
+                type: 'SYSTEM',
+                message: msg
+            });
+        }
+
+        function updateHostMemberList() {
+            const listEl = document.getElementById('hostMemberList');
+            const countEl = document.getElementById('hostMemberCount');
+            if (listEl) {
+                listEl.innerHTML = connectedPlayersList.map(function(p) {
+                    const isHostItem = p.id === 'host';
+                    const colorClass = isHostItem ? 'text-purple-700 font-bold' : 'text-gray-700';
+                    return '<li class="' + colorClass + ' flex items-center gap-1">' + escapeHtml(p.nick) + '</li>';
+                }).join('');
+            }
+            if (countEl) {
+                countEl.innerText = connectedPlayersList.length + ' participant(s)';
+            }
+        }
+
+        function sendChatMessage(e, mode) {
+            if (e && e.preventDefault) e.preventDefault();
+            if (mode === 'host') {
+                const input = document.getElementById('hostChatInput');
+                const msg = input.value.trim();
+                if (!msg) return;
+
+                renderChatMessage('hostChatMessages', '👑 Hôte', msg, true, true);
+                broadcastMessage({
+                    type: 'CHAT',
+                    sender: '👑 Hôte',
+                    message: msg,
+                    isHost: true
+                });
+                input.value = '';
+            } else {
+                const input = document.getElementById('playerChatInput');
+                const msg = input.value.trim();
+                if (!msg || !playerConn) return;
+
+                renderChatMessage('playerChatMessages', myNickname, msg, false, true);
+                playerConn.send({
+                    type: 'CHAT',
+                    sender: myNickname,
+                    message: msg
+                });
+                input.value = '';
+            }
+        }
+        window.sendChatMessage = sendChatMessage;
+
+        function renderChatMessage(containerId, sender, text, isHostSender, isSelf) {
+            if (typeof isHostSender === 'undefined') isHostSender = false;
+            if (typeof isSelf === 'undefined') isSelf = false;
+
+            const container = document.getElementById(containerId);
+            if (!container) return;
+
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'flex flex-col ' + (isSelf ? 'items-end' : 'items-start') + ' my-1';
+
+            const badgeBg = isHostSender ? 'bg-purple-600 text-white' : (isSelf ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800');
+            
+            msgDiv.innerHTML = '<span class="text-[10px] font-extrabold text-gray-400 mb-0.5 px-1">' + escapeHtml(sender) + '</span>' +
+                '<div class="' + badgeBg + ' px-3 py-2 rounded-2xl max-w-[85%] break-words text-sm font-semibold shadow-sm">' +
+                escapeHtml(text) +
+                '</div>';
+
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function renderSystemMessage(containerId, text) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'text-center my-1 text-gray-400 text-xs font-bold bg-purple-50 py-1 px-3 rounded-full mx-auto';
+            msgDiv.innerText = text;
+
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        function generateFloatingShapes() {
+            const container = document.getElementById('shapesContainer');
+            if (!container) return;
+            container.innerHTML = '';
+            const types = ['square', 'circle', 'triangle'];
+            const colors = ['#05d269', '#e21b3c', '#1368ce', '#ffa602', '#ffffff'];
+            
+            for (let i = 0; i < 20; i++) {
+                const shape = document.createElement('div');
+                const type = types[Math.floor(Math.random() * types.length)];
+                const color = colors[Math.floor(Math.random() * colors.length)];
+                const size = Math.floor(Math.random() * 40) + 20;
+                const left = Math.floor(Math.random() * 100);
+                const duration = Math.floor(Math.random() * 12) + 10;
+                const delay = Math.floor(Math.random() * 10);
+
+                shape.className = 'shape ' + type;
+                shape.style.left = left + '%';
+                shape.style.animationDuration = duration + 's';
+                shape.style.animationDelay = delay + 's';
+
+                if (type === 'triangle') {
+                    shape.style.borderBottomColor = color;
+                    shape.style.borderLeftWidth = (size / 2) + 'px';
+                    shape.style.borderRightWidth = (size / 2) + 'px';
+                    shape.style.borderBottomWidth = size + 'px';
+                } else {
+                    shape.style.width = size + 'px';
+                    shape.style.height = size + 'px';
+                    shape.style.backgroundColor = color;
+                }
+
+                container.appendChild(shape);
+            }
+        }
+        window.generateFloatingShapes = generateFloatingShapes;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            generateFloatingShapes();
+
+            const pinForm = document.getElementById('pinForm');
+            if (pinForm) {
+                pinForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    handlePinSubmit(e);
+                });
+            }
+
+            const nicknameForm = document.getElementById('nicknameForm');
+            if (nicknameForm) {
+                nicknameForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    handleNicknameSubmit(e);
+                });
+            }
+
+            const hostChatForm = document.getElementById('hostChatForm');
+            if (hostChatForm) {
+                hostChatForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    sendChatMessage(e, 'host');
+                });
+            }
+
+            const playerChatForm = document.getElementById('playerChatForm');
+            if (playerChatForm) {
+                playerChatForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    sendChatMessage(e, 'player');
+                });
+            }
+
+            const logo = document.getElementById('headerLogo');
+            if (logo) logo.addEventListener('click', resetApp);
+        });
+    </script>
+</body>
+</html>
